@@ -14,6 +14,12 @@ export class ArenaScene extends Phaser.Scene {
   private protagonistDropZone!: Phaser.GameObjects.Zone;
   private typewriterTimer?: Phaser.Time.TimerEvent;
   private hint?: Phaser.GameObjects.Text;
+  private orbitSparkles: Phaser.GameObjects.Arc[] = [];
+  private orbitAngles: number[] = [];
+  private orbitSpeeds: number[] = [];
+  private orbitRadii: number[] = [];
+  private trayItems: Phaser.GameObjects.Arc[] = [];
+  private trayCount = 0;
 
   constructor() {
     super({ key: "ArenaScene" });
@@ -91,7 +97,7 @@ export class ArenaScene extends Phaser.Scene {
     bottomGrad.fillGradientStyle(0x1a3a2e, 0x1a3a2e, 0x1a3a2e, 0x1a3a2e, 0, 0, 0.7, 0.7);
     bottomGrad.fillRect(0, height * 0.55, width, height * 0.45);
 
-    // Protagonist glow ring
+    // Protagonist glow ring (base glow)
     this.protagonistGlow = this.add.graphics();
     this.drawGlowRing(width / 2, height * 0.35, 75);
     this.tweens.add({
@@ -102,6 +108,29 @@ export class ArenaScene extends Phaser.Scene {
       repeat: -1,
       ease: "Sine.easeInOut",
     });
+
+    // Orbiting sparkle dots around protagonist
+    const sparkleColors = [0xffd700, 0xffe44d, 0xffffff];
+    const sparkleRadii = [80, 95, 110];
+    const sparkleSpeeds = [0.015, -0.01, 0.02];
+    for (let i = 0; i < 3; i++) {
+      const dot = this.add.circle(width / 2, height * 0.35, 3, sparkleColors[i], 0.9);
+      dot.setDepth(10);
+      this.orbitSparkles.push(dot);
+      this.orbitAngles.push((i * Math.PI * 2) / 3);
+      this.orbitSpeeds.push(sparkleSpeeds[i]);
+      this.orbitRadii.push(sparkleRadii[i]);
+      // Pulsing size
+      this.tweens.add({
+        targets: dot,
+        scale: { from: 0.8, to: 1.5 },
+        alpha: { from: 0.6, to: 1 },
+        duration: 800 + i * 200,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
 
     this.protagonist = this.createProtagonist(width / 2, height * 0.35);
 
@@ -165,6 +194,7 @@ export class ArenaScene extends Phaser.Scene {
       }
     });
 
+    this.createCollectedTray(width);
     this.placeObjects(width, height);
     this.setupDragHandlers();
   }
@@ -272,7 +302,7 @@ export class ArenaScene extends Phaser.Scene {
     );
   }
 
-  // Sync masks every frame
+  // Sync masks and orbiting sparkles every frame
   update() {
     for (const sprite of this.objectSprites) {
       const maskGfx = sprite.getData("maskGfx") as Phaser.GameObjects.Graphics | undefined;
@@ -282,6 +312,15 @@ export class ArenaScene extends Phaser.Scene {
         maskGfx.fillStyle(0xffffff);
         maskGfx.fillCircle(sprite.x, sprite.y, maskRadius);
       }
+    }
+
+    // Update orbiting sparkles around protagonist
+    const cx = this.protagonist.x;
+    const cy = this.protagonist.y;
+    for (let i = 0; i < this.orbitSparkles.length; i++) {
+      this.orbitAngles[i] += this.orbitSpeeds[i];
+      this.orbitSparkles[i].x = cx + Math.cos(this.orbitAngles[i]) * this.orbitRadii[i];
+      this.orbitSparkles[i].y = cy + Math.sin(this.orbitAngles[i]) * this.orbitRadii[i];
     }
   }
 
@@ -457,6 +496,32 @@ export class ArenaScene extends Phaser.Scene {
         ease: "Sine.easeInOut",
       });
       sprite.setData("bobTween", bobTween);
+
+      // "Drag me" shimmer sparkle every 3-4 seconds
+      this.time.addEvent({
+        delay: 3000 + Math.random() * 1000,
+        loop: true,
+        callback: () => {
+          if (!sprite.active || sprite.getData("isDragging")) return;
+          const sparkle = this.add.circle(
+            sprite.x + Phaser.Math.Between(-15, 15),
+            sprite.y + Phaser.Math.Between(-15, 15),
+            0,
+            0xffd700,
+            0.9
+          );
+          sparkle.setDepth(20);
+          this.tweens.add({
+            targets: sparkle,
+            scale: { from: 0, to: 2.5 },
+            alpha: { from: 0.9, to: 0 },
+            duration: 600,
+            ease: "Sine.easeOut",
+            onComplete: () => sparkle.destroy(),
+          });
+        },
+      });
+
       this.objectSprites.push(sprite);
     });
   }
@@ -497,6 +562,7 @@ export class ArenaScene extends Phaser.Scene {
 
     this.speechBubble = this.add.container(bubbleX, bubbleY, [bg, this.speechText]);
     this.speechBubble.setAlpha(0);
+    this.speechBubble.setScale(0.9);
   }
 
   private showMessageTypewriter(text: string) {
@@ -508,9 +574,10 @@ export class ArenaScene extends Phaser.Scene {
     this.tweens.add({
       targets: this.speechBubble,
       alpha: 1,
+      scale: 1,
       y: 75,
-      duration: 350,
-      ease: "Cubic.easeOut",
+      duration: 300,
+      ease: "Back.easeOut",
     });
 
     const chars = text.split("");
@@ -586,31 +653,43 @@ export class ArenaScene extends Phaser.Scene {
       sprite.disableInteractive();
       this.isThinking = false;
     } else {
-      // Wrong object — red flash feedback then snap back
+      // Wrong object — gentle shake then float back
       this.safePlay("hmm");
-      this.cameras.main.flash(200, 180, 60, 60, false, (_cam: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-        if (progress >= 1) this.cameras.main.resetFX();
-      });
 
-      const startY = sprite.getData("startY") as number;
+      // Shake horizontally 3 times, 5px amplitude, 300ms total
+      const shakeStartX = sprite.x;
       this.tweens.add({
         targets: sprite,
-        x: sprite.getData("startX"),
-        y: startY,
-        scale: sprite.getData("baseScale"),
-        alpha: 1,
-        duration: 500,
-        ease: "Cubic.easeOut",
+        x: shakeStartX + 5,
+        duration: 50,
+        yoyo: true,
+        repeat: 5,
+        ease: "Sine.easeInOut",
         onComplete: () => {
-          const newBob = this.tweens.add({
+          sprite.x = shakeStartX;
+          sprite.alpha = 1;
+
+          const startY = sprite.getData("startY") as number;
+          this.tweens.add({
             targets: sprite,
-            y: startY - 6,
-            duration: 1800 + Math.random() * 400,
-            yoyo: true,
-            repeat: -1,
-            ease: "Sine.easeInOut",
+            x: sprite.getData("startX"),
+            y: startY,
+            scale: sprite.getData("baseScale"),
+            alpha: 1,
+            duration: 500,
+            ease: "Cubic.easeOut",
+            onComplete: () => {
+              const newBob = this.tweens.add({
+                targets: sprite,
+                y: startY - 6,
+                duration: 1800 + Math.random() * 400,
+                yoyo: true,
+                repeat: -1,
+                ease: "Sine.easeInOut",
+              });
+              sprite.setData("bobTween", newBob);
+            },
           });
-          sprite.setData("bobTween", newBob);
         },
       });
       this.collectedIds = this.collectedIds.filter((cid) => cid !== id);
@@ -652,7 +731,10 @@ export class ArenaScene extends Phaser.Scene {
       alpha: 0.35,
       duration: 500,
       ease: "Cubic.easeIn",
-      onComplete: () => trailInterval.destroy(),
+      onComplete: () => {
+        trailInterval.destroy();
+        this.addToCollectedTray(sprite);
+      },
     });
   }
 
@@ -765,9 +847,51 @@ export class ArenaScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
 
+      // Play Again button
+      const btnBg = this.add.graphics();
+      const btnW = 200;
+      const btnH = 50;
+      const btnX = width / 2 - btnW / 2;
+      const btnY = height / 2 + 80;
+      btnBg.fillStyle(0xffd700, 1);
+      btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, 14);
+      btnBg.lineStyle(2, 0x6b4423, 0.6);
+      btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, 14);
+
+      const btnText = this.add
+        .text(width / 2, btnY + btnH / 2, "Play Again", {
+          fontSize: "22px",
+          color: "#2c2c2a",
+          fontFamily: "Nunito, sans-serif",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5);
+
+      // Invisible interactive zone for the button (starts disabled, enabled after fade-in)
+      const btnZone = this.add.zone(width / 2, btnY + btnH / 2, btnW, btnH);
+      btnZone.on("pointerover", () => {
+        btnBg.clear();
+        btnBg.fillStyle(0xffe44d, 1);
+        btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, 14);
+        btnBg.lineStyle(2, 0x6b4423, 0.6);
+        btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, 14);
+      });
+      btnZone.on("pointerout", () => {
+        btnBg.clear();
+        btnBg.fillStyle(0xffd700, 1);
+        btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, 14);
+        btnBg.lineStyle(2, 0x6b4423, 0.6);
+        btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, 14);
+      });
+      btnZone.on("pointerdown", () => {
+        this.scene.start("TitleScene");
+      });
+
       overlay.alpha = 0;
       victoryText.alpha = 0;
       subtitleText.alpha = 0;
+      btnBg.alpha = 0;
+      btnText.alpha = 0;
 
       this.tweens.add({
         targets: overlay,
@@ -790,7 +914,50 @@ export class ArenaScene extends Phaser.Scene {
         delay: 500,
         ease: "Sine.easeOut",
       });
+      this.tweens.add({
+        targets: [btnBg, btnText],
+        alpha: 1,
+        duration: 600,
+        delay: 800,
+        ease: "Sine.easeOut",
+        onComplete: () => {
+          btnZone.setInteractive({ useHandCursor: true });
+        },
+      });
     });
+  }
+
+  private createCollectedTray(_width: number) {
+    // Tray area lives at top-right; items added dynamically
+    this.trayItems = [];
+    this.trayCount = 0;
+  }
+
+  private addToCollectedTray(sprite: Phaser.GameObjects.Image) {
+    const { width } = this.scale;
+    const trayX = width - 50 - this.trayCount * 40;
+    const trayY = 20;
+
+    // Determine color from object's palette hash
+    const id = sprite.getData("id") as string;
+    const palette = [0xd4a574, 0x7cb342, 0x5c9ece, 0xe57373, 0xffd54f, 0xba68c8];
+    const hash = id.split("").reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+    const color = palette[hash % palette.length];
+
+    const dot = this.add.circle(trayX, trayY, 0, color, 0.9);
+    dot.setStrokeStyle(2, 0xffffff, 0.8);
+    dot.setDepth(30);
+
+    this.tweens.add({
+      targets: dot,
+      radius: 15,
+      scale: { from: 0, to: 1 },
+      duration: 400,
+      ease: "Back.easeOut",
+    });
+
+    this.trayItems.push(dot);
+    this.trayCount++;
   }
 
   private safePlay(key: string) {

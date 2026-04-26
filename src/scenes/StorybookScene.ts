@@ -10,7 +10,12 @@ export class StorybookScene extends Phaser.Scene {
   private nextButton!: Phaser.GameObjects.Container;
   private currentAudio?: Phaser.Sound.BaseSound;
   private typewriterTimer?: Phaser.Time.TimerEvent;
-  private progressDots: Phaser.GameObjects.Arc[] = [];
+  private progressDots: Phaser.GameObjects.Container[] = [];
+  private cornerFlourishes?: Phaser.GameObjects.Graphics;
+  private textPanel?: Phaser.GameObjects.Graphics;
+  private textPanelShadow?: Phaser.GameObjects.Graphics;
+  private sparkles: Phaser.GameObjects.Graphics[] = [];
+  private sparkleTweens: Phaser.Tweens.Tween[] = [];
 
   constructor() {
     super({ key: "StorybookScene" });
@@ -56,8 +61,11 @@ export class StorybookScene extends Phaser.Scene {
       paperTexture.fillRect(0, y, width, 1);
     }
 
-    // Page progress dots
+    // Page progress dots (mini book-page icons)
     this.createProgressDots(width, height);
+
+    // Text panel background (parchment reading area)
+    this.createTextPanel(width, height);
 
     // Page text — larger for readability
     this.pageText = this.add
@@ -72,40 +80,212 @@ export class StorybookScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // Next button
-    this.nextButton = this.createButton(width / 2, height - 55, "Next  \u2192", () =>
+    this.nextButton = this.createButton(width / 2, height - 55, this.getButtonLabel(0), () =>
       this.advance()
     );
 
     this.showPage(0);
   }
 
+  /* ── Text panel (parchment reading area) ── */
+  private createTextPanel(width: number, height: number) {
+    const panelW = width * 0.88;
+    const panelH = height * 0.2;
+    const panelX = width / 2 - panelW / 2;
+    const panelY = height * 0.78 - panelH / 2;
+
+    // Soft shadow behind the panel
+    this.textPanelShadow = this.add.graphics();
+    this.textPanelShadow.fillStyle(0x000000, 0.06);
+    this.textPanelShadow.fillRoundedRect(panelX + 3, panelY + 3, panelW, panelH, 14);
+
+    // Parchment panel
+    this.textPanel = this.add.graphics();
+    this.textPanel.fillStyle(0xf5f0e1, 1);
+    this.textPanel.fillRoundedRect(panelX, panelY, panelW, panelH, 14);
+    this.textPanel.lineStyle(1, 0xd4c9a8, 0.5);
+    this.textPanel.strokeRoundedRect(panelX, panelY, panelW, panelH, 14);
+  }
+
+  /* ── Corner flourishes on the illustration ── */
+  private drawCornerFlourishes(
+    cx: number,
+    cy: number,
+    imgW: number,
+    imgH: number
+  ) {
+    if (this.cornerFlourishes) {
+      this.cornerFlourishes.destroy();
+    }
+    const g = this.add.graphics();
+    g.lineStyle(2, 0x8b6f47, 0.4);
+
+    const left = cx - imgW / 2;
+    const right = cx + imgW / 2;
+    const top = cy - imgH / 2;
+    const bottom = cy + imgH / 2;
+    const len = 28; // flourish arm length
+    const offset = 6; // inset from the image edge
+
+    // Each corner: two curved lines forming an L-like flourish with a subtle curve
+    const corners: { x: number; y: number; dx: number; dy: number }[] = [
+      { x: left + offset, y: top + offset, dx: 1, dy: 1 }, // top-left
+      { x: right - offset, y: top + offset, dx: -1, dy: 1 }, // top-right
+      { x: left + offset, y: bottom - offset, dx: 1, dy: -1 }, // bottom-left
+      { x: right - offset, y: bottom - offset, dx: -1, dy: -1 }, // bottom-right
+    ];
+
+    for (const c of corners) {
+      // Horizontal arm with curve
+      const curve1 = new Phaser.Curves.QuadraticBezier(
+        new Phaser.Math.Vector2(c.x, c.y),
+        new Phaser.Math.Vector2(c.x + c.dx * len * 0.5, c.y - c.dy * 4),
+        new Phaser.Math.Vector2(c.x + c.dx * len, c.y)
+      );
+      curve1.draw(g, 16);
+
+      // Vertical arm with curve
+      const curve2 = new Phaser.Curves.QuadraticBezier(
+        new Phaser.Math.Vector2(c.x, c.y),
+        new Phaser.Math.Vector2(c.x - c.dx * 4, c.y + c.dy * len * 0.5),
+        new Phaser.Math.Vector2(c.x, c.y + c.dy * len)
+      );
+      curve2.draw(g, 16);
+
+      // Small corner dot
+      g.fillStyle(0x8b6f47, 0.35);
+      g.fillCircle(c.x, c.y, 2);
+    }
+
+    g.setAlpha(0);
+    this.tweens.add({ targets: g, alpha: 1, duration: 600, delay: 200 });
+    this.cornerFlourishes = g;
+  }
+
+  /* ── Floating sparkle particles ── */
+  private spawnSparkles(cx: number, cy: number, imgW: number, imgH: number) {
+    // Clean up old sparkles
+    for (const s of this.sparkles) s.destroy();
+    for (const t of this.sparkleTweens) t.destroy();
+    this.sparkles = [];
+    this.sparkleTweens = [];
+
+    const left = cx - imgW / 2 + 20;
+    const right = cx + imgW / 2 - 20;
+    const top = cy - imgH / 2 + 20;
+    const bottom = cy + imgH / 2 - 20;
+
+    for (let i = 0; i < 3; i++) {
+      const sx = Phaser.Math.Between(left, right);
+      const sy = Phaser.Math.Between(top, bottom);
+      const sparkle = this.add.graphics();
+
+      // Draw a tiny 4-pointed star
+      sparkle.fillStyle(0xfff8dc, 0.7);
+      sparkle.fillCircle(0, 0, 2);
+      sparkle.fillRect(-4, -0.5, 8, 1);
+      sparkle.fillRect(-0.5, -4, 1, 8);
+
+      sparkle.setPosition(sx, sy);
+      sparkle.setAlpha(0);
+      sparkle.setScale(0.6);
+
+      this.sparkles.push(sparkle);
+
+      // Gentle floating animation with fade in/out loop
+      const delay = i * 800;
+      const tw = this.tweens.add({
+        targets: sparkle,
+        alpha: { from: 0, to: 0.6 },
+        scale: { from: 0.5, to: 0.9 },
+        y: sy - Phaser.Math.Between(15, 30),
+        x: sx + Phaser.Math.Between(-10, 10),
+        duration: 2400 + i * 400,
+        delay,
+        yoyo: true,
+        repeat: -1,
+        repeatDelay: 600 + i * 300,
+        ease: "Sine.easeInOut",
+      });
+      this.sparkleTweens.push(tw);
+    }
+  }
+
+  /* ── Progress dots as mini book-page icons ── */
   private createProgressDots(width: number, height: number) {
-    const dotSpacing = 20;
+    const dotSpacing = 28;
     const totalWidth = (this.pages.length - 1) * dotSpacing;
     const startX = width / 2 - totalWidth / 2;
+    const pageW = 10;
+    const pageH = 13;
 
     for (let i = 0; i < this.pages.length; i++) {
-      const dot = this.add.circle(
-        startX + i * dotSpacing,
-        height * 0.68,
-        4,
-        i === 0 ? 0xd4a574 : 0xd4a574,
-        i === 0 ? 1 : 0.25
-      );
-      this.progressDots.push(dot);
+      const container = this.add.container(startX + i * dotSpacing, height * 0.68);
+
+      // Mini page icon (rounded rect)
+      const pageIcon = this.add.graphics();
+      pageIcon.fillStyle(0xd4a574, i === 0 ? 1 : 0.25);
+      pageIcon.fillRoundedRect(-pageW / 2, -pageH / 2, pageW, pageH, 2);
+      pageIcon.lineStyle(1, 0x8b6f47, i === 0 ? 0.6 : 0.15);
+      pageIcon.strokeRoundedRect(-pageW / 2, -pageH / 2, pageW, pageH, 2);
+
+      // Tiny "text lines" inside the page
+      const lines = this.add.graphics();
+      lines.fillStyle(0x8b6f47, i === 0 ? 0.35 : 0.1);
+      lines.fillRect(-3, -3, 6, 1);
+      lines.fillRect(-3, 0, 6, 1);
+      lines.fillRect(-3, 3, 4, 1);
+
+      container.add([pageIcon, lines]);
+
+      // Warm glow for active page (circle behind the icon)
+      const glow = this.add.graphics();
+      glow.fillStyle(0xd4a574, 0);
+      glow.fillCircle(0, 0, 11);
+      container.addAt(glow, 0); // behind icon
+
+      this.progressDots.push(container);
     }
   }
 
   private updateProgressDots(index: number) {
-    this.progressDots.forEach((dot, i) => {
+    const pageW = 10;
+    const pageH = 13;
+
+    this.progressDots.forEach((container, i) => {
+      const isActive = i === index;
+      const isPast = i < index;
+
+      // Redraw the page icon with updated colors
+      const pageIcon = container.getAt(1) as Phaser.GameObjects.Graphics;
+      pageIcon.clear();
+      pageIcon.fillStyle(0xd4a574, isActive || isPast ? 1 : 0.25);
+      pageIcon.fillRoundedRect(-pageW / 2, -pageH / 2, pageW, pageH, 2);
+      pageIcon.lineStyle(1, 0x8b6f47, isActive || isPast ? 0.6 : 0.15);
+      pageIcon.strokeRoundedRect(-pageW / 2, -pageH / 2, pageW, pageH, 2);
+
+      // Update text lines opacity
+      const lines = container.getAt(2) as Phaser.GameObjects.Graphics;
+      lines.clear();
+      lines.fillStyle(0x8b6f47, isActive || isPast ? 0.35 : 0.1);
+      lines.fillRect(-3, -3, 6, 1);
+      lines.fillRect(-3, 0, 6, 1);
+      lines.fillRect(-3, 3, 4, 1);
+
+      // Warm glow on active
+      const glow = container.getAt(0) as Phaser.GameObjects.Graphics;
+      glow.clear();
+      if (isActive) {
+        glow.fillStyle(0xd4a574, 0.25);
+        glow.fillCircle(0, 0, 11);
+      }
+
       this.tweens.add({
-        targets: dot,
-        alpha: i <= index ? 1 : 0.25,
-        scale: i === index ? 1.3 : 1,
+        targets: container,
+        scale: isActive ? 1.35 : 1,
         duration: 250,
         ease: "Sine.easeOut",
       });
-      dot.setFillStyle(0xd4a574);
     });
   }
 
@@ -129,6 +309,14 @@ export class StorybookScene extends Phaser.Scene {
     });
   }
 
+  /* ── Button label with page numbers ── */
+  private getButtonLabel(index: number): string {
+    if (index === this.pages.length - 1) {
+      return "Enter the world  \u2192";
+    }
+    return `Page ${index + 2} of ${this.pages.length}  \u2192`;
+  }
+
   private showPage(index: number) {
     const page = this.pages[index];
     const { width, height } = this.scale;
@@ -136,13 +324,15 @@ export class StorybookScene extends Phaser.Scene {
     // Update progress
     this.updateProgressDots(index);
 
-    // Fade out old image with slide
+    // Fade out old image with slide + scale down (depth effect)
     if (this.pageImage) {
       const oldImg = this.pageImage;
       this.tweens.add({
         targets: oldImg,
         alpha: 0,
         x: oldImg.x - 50,
+        scaleX: oldImg.scaleX * 0.95,
+        scaleY: oldImg.scaleY * 0.95,
         duration: 300,
         ease: "Sine.easeIn",
         onComplete: () => oldImg.destroy(),
@@ -150,17 +340,32 @@ export class StorybookScene extends Phaser.Scene {
       this.pageImage = undefined;
     }
 
+    // Fade out old flourishes
+    if (this.cornerFlourishes) {
+      const oldFlourishes = this.cornerFlourishes;
+      this.tweens.add({
+        targets: oldFlourishes,
+        alpha: 0,
+        duration: 200,
+        onComplete: () => oldFlourishes.destroy(),
+      });
+      this.cornerFlourishes = undefined;
+    }
+
     if (this.textures.exists(page.imageKey)) {
       this.pageImage = this.add.image(width / 2 + 50, height * 0.35, page.imageKey);
       const targetW = width * 0.75;
       const targetH = height * 0.52;
       const scaleToFit = Math.max(targetW / this.pageImage.width, targetH / this.pageImage.height);
-      this.pageImage.setScale(scaleToFit);
+      const finalScale = scaleToFit;
+
+      // Start slightly zoomed in for depth effect
+      this.pageImage.setScale(finalScale * 1.05);
       this.pageImage.setAlpha(0);
 
       // Rounded mask for storybook illustrations
-      const imgW = this.pageImage.displayWidth;
-      const imgH = this.pageImage.displayHeight;
+      const imgW = this.pageImage.width * finalScale;
+      const imgH = this.pageImage.height * finalScale;
       const maskShape = this.add.graphics().setVisible(false);
       maskShape.fillStyle(0xffffff);
       maskShape.fillRoundedRect(
@@ -185,13 +390,21 @@ export class StorybookScene extends Phaser.Scene {
       imgShadow.setAlpha(0);
       this.tweens.add({ targets: imgShadow, alpha: 1, duration: 500, delay: 100 });
 
-      // Slide + fade in
+      // Slide + fade in + scale from 1.05 to 1.0 (zoom-in depth effect)
       this.tweens.add({
         targets: this.pageImage,
         alpha: 1,
         x: width / 2,
+        scaleX: finalScale,
+        scaleY: finalScale,
         duration: 450,
         ease: "Cubic.easeOut",
+        onComplete: () => {
+          // Draw corner flourishes after image settles
+          this.drawCornerFlourishes(width / 2, height * 0.35, imgW, imgH);
+          // Spawn floating sparkles
+          this.spawnSparkles(width / 2, height * 0.35, imgW, imgH);
+        },
       });
     } else {
       const g = this.add.graphics();
@@ -208,6 +421,14 @@ export class StorybookScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
       this.pageImage = placeholder as unknown as Phaser.GameObjects.Image;
+
+      // Flourishes on placeholder too
+      this.drawCornerFlourishes(
+        width / 2,
+        height * 0.1 + height * 0.55 / 2,
+        width * 0.7,
+        height * 0.55
+      );
     }
 
     // Typewriter text
@@ -222,13 +443,9 @@ export class StorybookScene extends Phaser.Scene {
       this.currentAudio.play();
     }
 
-    // Update button label on last page
+    // Update button label with page progress
     const btnText = this.nextButton.getAt(2) as Phaser.GameObjects.Text;
-    if (index === this.pages.length - 1) {
-      btnText.setText("Enter the world  \u2192");
-    } else {
-      btnText.setText("Next  \u2192");
-    }
+    btnText.setText(this.getButtonLabel(index));
   }
 
   private advance() {
