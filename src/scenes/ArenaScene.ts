@@ -11,6 +11,9 @@ export class ArenaScene extends Phaser.Scene {
   private collectedIds: string[] = [];
   private objectSprites: Phaser.GameObjects.Image[] = [];
   private isThinking = false;
+  private wrongAttempts = 0;
+  private hintGlows: Phaser.GameObjects.Arc[] = [];
+  private descriptionDismissTimer?: Phaser.Time.TimerEvent;
   private protagonistDropZone!: Phaser.GameObjects.Zone;
   private typewriterTimer?: Phaser.Time.TimerEvent;
   private hint?: Phaser.GameObjects.Text;
@@ -314,6 +317,15 @@ export class ArenaScene extends Phaser.Scene {
       }
     }
 
+    // Sync hint glows with sprite positions
+    for (const sprite of this.objectSprites) {
+      const glow = sprite.getData("hintGlow") as Phaser.GameObjects.Arc | undefined;
+      if (glow) {
+        glow.x = sprite.x;
+        glow.y = sprite.y;
+      }
+    }
+
     // Update orbiting sparkles around protagonist
     const cx = this.protagonist.x;
     const cy = this.protagonist.y;
@@ -462,6 +474,38 @@ export class ArenaScene extends Phaser.Scene {
       sprite.setData("startY", pos.y);
       sprite.setInteractive({ draggable: true, useHandCursor: true });
 
+      // Feature 5: Tap to see object description
+      sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        sprite.setData("tapStartX", pointer.x);
+        sprite.setData("tapStartY", pointer.y);
+      });
+      sprite.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+        const tapStartX = sprite.getData("tapStartX") as number;
+        const tapStartY = sprite.getData("tapStartY") as number;
+        if (tapStartX === undefined || tapStartY === undefined) return;
+        const dist = Phaser.Math.Distance.Between(tapStartX, tapStartY, pointer.x, pointer.y);
+        if (dist < 5 && !this.isThinking) {
+          const objDef = this.story.objects.find((o) => o.id === obj.id);
+          if (objDef?.description) {
+            // Clear any existing dismiss timer
+            if (this.descriptionDismissTimer) {
+              this.descriptionDismissTimer.destroy();
+            }
+            this.showMessage(objDef.description);
+            this.descriptionDismissTimer = this.time.delayedCall(3000, () => {
+              this.tweens.add({
+                targets: this.speechBubble,
+                alpha: 0,
+                scale: 0.9,
+                duration: 300,
+                ease: "Sine.easeIn",
+              });
+              this.descriptionDismissTimer = undefined;
+            });
+          }
+        }
+      });
+
       // Hover glow — smooth tween instead of instant
       sprite.on("pointerover", () => {
         if (!this.isThinking) {
@@ -602,6 +646,12 @@ export class ArenaScene extends Phaser.Scene {
     if (this.isThinking) return;
     this.isThinking = true;
 
+    // Dismiss any description auto-dismiss timer
+    if (this.descriptionDismissTimer) {
+      this.descriptionDismissTimer.destroy();
+      this.descriptionDismissTimer = undefined;
+    }
+
     const id = sprite.getData("id") as string;
     this.safePlay("drop");
 
@@ -629,21 +679,52 @@ export class ArenaScene extends Phaser.Scene {
       this.collectedIds.includes(s)
     );
 
-    const responseText = isCorrectSolution
+    const fallbackText = isCorrectSolution
       ? this.story.successMessage
       : (this.story.objects.find((o) => o.id === id)?.responseText ?? "...");
-
-    this.showMessage(responseText);
-
-    if (isDemo()) {
-      const audioFile = isCorrectSolution ? "success" : id;
-      const audio = new Audio(`/assets/audio/responses/${audioFile}.mp3`);
-      audio.play().catch(() => {});
-    }
 
     const objectDef = this.story.objects.find((o) => o.id === id);
     const isCorrectObject = objectDef?.isCorrect ?? false;
 
+    // --- Feature 1: Live AI responses for custom stories ---
+    if (isDemo()) {
+      // Demo mode: use pre-baked text + cached MP3
+      this.showMessage(fallbackText);
+      const audioFile = isCorrectSolution ? "success" : id;
+      const audio = new Audio(`/assets/audio/responses/${audioFile}.mp3`);
+      audio.play().catch(() => {});
+      this.finalizeDrop(sprite, id, isCorrectSolution, isCorrectObject);
+    } else {
+      // Custom story: call API for dynamic response
+      this.showMessage("...");
+      fetch("/api/protagonist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ objectIds: this.collectedIds, storyBible: this.story }),
+      })
+        .then((res) => res.json())
+        .then((data: { text?: string }) => {
+          const responseText = data.text || fallbackText;
+          this.showMessage(responseText);
+          // --- Feature 3: TTS for custom story responses ---
+          this.fetchAndPlayTTS(responseText);
+        })
+        .catch(() => {
+          this.showMessage(fallbackText);
+        })
+        .finally(() => {
+          this.finalizeDrop(sprite, id, isCorrectSolution, isCorrectObject);
+        });
+    }
+  }
+
+  /** Shared post-drop logic for both demo and custom modes */
+  private finalizeDrop(
+    sprite: Phaser.GameObjects.Image,
+    id: string,
+    isCorrectSolution: boolean,
+    isCorrectObject: boolean
+  ) {
     if (isCorrectSolution) {
       this.safePlay("celebration");
       this.celebrate();
@@ -651,12 +732,19 @@ export class ArenaScene extends Phaser.Scene {
       const correctIndex = this.story.solution.indexOf(id);
       this.flyToProtagonist(sprite, correctIndex === 0 ? -60 : 60);
       sprite.disableInteractive();
+      // Clean up any hint glow on this sprite
+      this.removeHintGlow(sprite);
       this.isThinking = false;
     } else {
       // Wrong object — gentle shake then float back
       this.safePlay("hmm");
+      this.wrongAttempts++;
 
-      // Shake horizontally 3 times, 5px amplitude, 300ms total
+      // Feature 4: Show hints after 2 wrong attempts
+      if (this.wrongAttempts >= 2) {
+        this.showHintGlows();
+      }
+
       const shakeStartX = sprite.x;
       this.tweens.add({
         targets: sprite,
@@ -694,6 +782,64 @@ export class ArenaScene extends Phaser.Scene {
       });
       this.collectedIds = this.collectedIds.filter((cid) => cid !== id);
       this.isThinking = false;
+    }
+  }
+
+  /** Feature 3: Fetch TTS audio and play it (non-blocking, fire-and-forget) */
+  private fetchAndPlayTTS(text: string) {
+    fetch("/api/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((res) => res.json())
+      .then((data: { audioBase64?: string | null }) => {
+        if (data.audioBase64) {
+          const binary = atob(data.audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: "audio/mp3" });
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.play().catch(() => {});
+        }
+      })
+      .catch(() => {
+        // TTS is optional — fail silently
+      });
+  }
+
+  /** Feature 4: Show golden glow behind correct (uncollected) objects */
+  private showHintGlows() {
+    // Only add glows for correct objects that haven't been collected yet
+    for (const solutionId of this.story.solution) {
+      if (this.collectedIds.includes(solutionId)) continue;
+      const sprite = this.objectSprites.find((s) => s.getData("id") === solutionId);
+      if (!sprite || sprite.getData("hintGlow")) continue;
+
+      const glow = this.add.circle(sprite.x, sprite.y, 50, 0xffd700, 0.3);
+      glow.setDepth(sprite.depth - 1);
+      sprite.setData("hintGlow", glow);
+      this.hintGlows.push(glow);
+
+      this.tweens.add({
+        targets: glow,
+        alpha: { from: 0.3, to: 0.7 },
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
+  }
+
+  /** Remove a hint glow for a specific sprite (when collected) */
+  private removeHintGlow(sprite: Phaser.GameObjects.Image) {
+    const glow = sprite.getData("hintGlow") as Phaser.GameObjects.Arc | undefined;
+    if (glow) {
+      this.tweens.killTweensOf(glow);
+      glow.destroy();
+      sprite.setData("hintGlow", null);
+      this.hintGlows = this.hintGlows.filter((g) => g !== glow);
     }
   }
 
@@ -887,6 +1033,26 @@ export class ArenaScene extends Phaser.Scene {
         this.scene.start("TitleScene");
       });
 
+      // Feature 6: Victory stars above the title
+      const starTexts: Phaser.GameObjects.Text[] = [];
+      const starY = height / 2 - 80;
+      const starSpacing = 60;
+      const starStartX = width / 2 - starSpacing;
+      for (let i = 0; i < 3; i++) {
+        const star = this.add
+          .text(starStartX + i * starSpacing, starY, "\u2605", {
+            fontSize: "40px",
+            color: "#ffd700",
+            fontFamily: "Nunito, sans-serif",
+            stroke: "#6b4423",
+            strokeThickness: 2,
+          })
+          .setOrigin(0.5);
+        star.setScale(0);
+        star.alpha = 0;
+        starTexts.push(star);
+      }
+
       overlay.alpha = 0;
       victoryText.alpha = 0;
       subtitleText.alpha = 0;
@@ -907,6 +1073,39 @@ export class ArenaScene extends Phaser.Scene {
         delay: 200,
         ease: "Cubic.easeOut",
       });
+
+      // Pop in stars staggered after title appears
+      starTexts.forEach((star, i) => {
+        this.tweens.add({
+          targets: star,
+          alpha: 1,
+          scale: { from: 0, to: 1.2 },
+          duration: 350,
+          delay: 500 + i * 300,
+          ease: "Back.easeOut",
+          onComplete: () => {
+            // Settle to scale 1
+            this.tweens.add({
+              targets: star,
+              scale: 1,
+              duration: 150,
+              ease: "Sine.easeOut",
+              onComplete: () => {
+                // Gentle rotation wobble
+                this.tweens.add({
+                  targets: star,
+                  angle: { from: -8, to: 8 },
+                  duration: 600,
+                  yoyo: true,
+                  repeat: -1,
+                  ease: "Sine.easeInOut",
+                });
+              },
+            });
+          },
+        });
+      });
+
       this.tweens.add({
         targets: subtitleText,
         alpha: 1,

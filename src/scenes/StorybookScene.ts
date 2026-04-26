@@ -324,15 +324,35 @@ export class StorybookScene extends Phaser.Scene {
     // Update progress
     this.updateProgressDots(index);
 
-    // Fade out old image with slide + scale down (depth effect)
+    // Page-turn flip-out: squish horizontally + slight rotation + shadow
     if (this.pageImage) {
       const oldImg = this.pageImage;
+      oldImg.setOrigin(0.5, 0.5);
+
+      // Shadow line that sweeps across during flip-out
+      const imgW = oldImg.displayWidth;
+      const imgH = oldImg.displayHeight;
+      const shadow = this.add.graphics();
+      shadow.fillStyle(0x000000, 0.25);
+      shadow.fillRect(-3, -imgH / 2, 6, imgH);
+      shadow.setPosition(oldImg.x, oldImg.y);
+      shadow.setAlpha(0);
+
+      // Animate the shadow sweep from center to right edge
+      this.tweens.add({
+        targets: shadow,
+        x: oldImg.x + imgW / 2,
+        alpha: { from: 0.6, to: 0 },
+        duration: 300,
+        ease: "Sine.easeIn",
+        onComplete: () => shadow.destroy(),
+      });
+
+      // Flip-out: scaleX 1 -> 0 with slight rotation
       this.tweens.add({
         targets: oldImg,
-        alpha: 0,
-        x: oldImg.x - 50,
-        scaleX: oldImg.scaleX * 0.95,
-        scaleY: oldImg.scaleY * 0.95,
+        scaleX: 0,
+        angle: 6,
         duration: 300,
         ease: "Sine.easeIn",
         onComplete: () => oldImg.destroy(),
@@ -353,15 +373,17 @@ export class StorybookScene extends Phaser.Scene {
     }
 
     if (this.textures.exists(page.imageKey)) {
-      this.pageImage = this.add.image(width / 2 + 50, height * 0.35, page.imageKey);
+      this.pageImage = this.add.image(width / 2, height * 0.35, page.imageKey);
+      this.pageImage.setOrigin(0.5, 0.5);
       const targetW = width * 0.75;
       const targetH = height * 0.52;
       const scaleToFit = Math.max(targetW / this.pageImage.width, targetH / this.pageImage.height);
       const finalScale = scaleToFit;
 
-      // Start slightly zoomed in for depth effect
-      this.pageImage.setScale(finalScale * 1.05);
-      this.pageImage.setAlpha(0);
+      // Start with scaleX 0 for flip-in, scaleY at final, slight counter-rotation
+      this.pageImage.setScale(0, finalScale);
+      this.pageImage.setAngle(-6);
+      this.pageImage.setAlpha(1);
 
       // Rounded mask for storybook illustrations
       const imgW = this.pageImage.width * finalScale;
@@ -388,22 +410,37 @@ export class StorybookScene extends Phaser.Scene {
         20
       );
       imgShadow.setAlpha(0);
-      this.tweens.add({ targets: imgShadow, alpha: 1, duration: 500, delay: 100 });
+      this.tweens.add({ targets: imgShadow, alpha: 1, duration: 500, delay: 300 });
 
-      // Slide + fade in + scale from 1.05 to 1.0 (zoom-in depth effect)
+      // Flip-in: scaleX 0 -> finalScale with rotation unwinding, delayed to follow flip-out
       this.tweens.add({
         targets: this.pageImage,
-        alpha: 1,
-        x: width / 2,
         scaleX: finalScale,
-        scaleY: finalScale,
-        duration: 450,
-        ease: "Cubic.easeOut",
+        angle: 0,
+        duration: 300,
+        delay: 300,
+        ease: "Sine.easeOut",
         onComplete: () => {
           // Draw corner flourishes after image settles
           this.drawCornerFlourishes(width / 2, height * 0.35, imgW, imgH);
           // Spawn floating sparkles
           this.spawnSparkles(width / 2, height * 0.35, imgW, imgH);
+
+          // Sheen sweep: semi-transparent white strip moving left to right
+          const sheen = this.add.graphics();
+          sheen.fillStyle(0xffffff, 0.25);
+          sheen.fillRect(-15, -imgH / 2, 30, imgH);
+          sheen.setPosition(width / 2 - imgW / 2, height * 0.35);
+          sheen.setAlpha(1);
+
+          this.tweens.add({
+            targets: sheen,
+            x: width / 2 + imgW / 2,
+            alpha: 0,
+            duration: 400,
+            ease: "Sine.easeOut",
+            onComplete: () => sheen.destroy(),
+          });
         },
       });
     } else {
