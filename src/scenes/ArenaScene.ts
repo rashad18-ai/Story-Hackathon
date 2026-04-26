@@ -33,7 +33,8 @@ export class ArenaScene extends Phaser.Scene {
     const assets = getAssets();
     const demo = isDemo();
 
-    const bgData = assets?.images.get("background");
+    const arenaBg = assets?.images.get("arena_background");
+    const bgData = arenaBg || assets?.images.get("background");
     if (bgData) {
       this.load.image("background", bgData);
     } else if (demo) {

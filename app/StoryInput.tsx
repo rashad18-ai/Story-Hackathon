@@ -211,10 +211,19 @@ export default function StoryInput({ onStoryReady, onPlayDemo }: StoryInputProps
     bible: StoryBible,
     assets: GeneratedAssets
   ) {
-    const requests = bible.objects.map((obj) => ({
+    const requests: { id: string; prompt: string; aspectRatio?: string }[] = bible.objects.map((obj) => ({
       id: obj.id,
       prompt: obj.imagePrompt || `${obj.name}, ${obj.description}`,
     }));
+
+    // Generate a custom arena background from the story's setting (landscape 16:10)
+    if (bible.setting.backgroundPrompt) {
+      requests.push({
+        id: "arena_background",
+        prompt: bible.setting.backgroundPrompt + ", wide landscape, no characters, no text, game background",
+        aspectRatio: "ASPECT_16_10",
+      });
+    }
 
     // Also generate protagonist portrait if not already in assets
     if (!assets.images.has("protagonist")) {

@@ -3,13 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 interface ImageRequest {
   id: string;
   prompt: string;
+  aspectRatio?: string;
 }
 
 async function generateWithIdeogram(
   prompt: string,
-  apiKey: string
+  apiKey: string,
+  aspectRatio: string = "ASPECT_1_1"
 ): Promise<string | null> {
   try {
+    const isBackground = aspectRatio !== "ASPECT_1_1";
+    const styleHint = isBackground
+      ? "children's book illustration style, atmospheric, painterly, no text"
+      : "children's book illustration style, simple, colorful, white background";
+
     const res = await fetch("https://api.ideogram.ai/generate", {
       method: "POST",
       headers: {
@@ -18,8 +25,8 @@ async function generateWithIdeogram(
       },
       body: JSON.stringify({
         image_request: {
-          prompt: `${prompt}, children's book illustration style, simple, colorful, white background`,
-          aspect_ratio: "ASPECT_1_1",
+          prompt: `${prompt}, ${styleHint}`,
+          aspect_ratio: aspectRatio,
           model: "V_2",
           magic_prompt_option: "AUTO",
         },
@@ -65,7 +72,7 @@ export async function POST(req: NextRequest) {
     for (const batch of batches) {
       const batchResults = await Promise.all(
         batch.map(async (r) => {
-          const dataUrl = await generateWithIdeogram(r.prompt, apiKey);
+          const dataUrl = await generateWithIdeogram(r.prompt, apiKey, r.aspectRatio);
           return { id: r.id, dataUrl };
         })
       );
