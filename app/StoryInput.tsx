@@ -140,12 +140,11 @@ export default function StoryInput({ onStoryReady, onPlayDemo }: StoryInputProps
 
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.src = "/pdf.min.js";
       script.onload = () => {
         const lib = (window as any).pdfjsLib;
         if (lib) {
-          lib.GlobalWorkerOptions.workerSrc =
-            "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          lib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
           resolve(lib);
         } else {
           reject(new Error("pdfjsLib not found"));
