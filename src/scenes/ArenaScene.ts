@@ -23,6 +23,7 @@ export class ArenaScene extends Phaser.Scene {
   private orbitRadii: number[] = [];
   private trayItems: Phaser.GameObjects.Arc[] = [];
   private trayCount = 0;
+  private currentResponseAudio?: HTMLAudioElement;
 
   constructor() {
     super({ key: "ArenaScene" });
@@ -164,11 +165,9 @@ export class ArenaScene extends Phaser.Scene {
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const blob = new Blob([bytes], { type: "audio/mp3" });
-      const audio = new Audio(URL.createObjectURL(blob));
-      audio.play().catch(() => {});
+      this.playResponseAudio(new Audio(URL.createObjectURL(blob)));
     } else if (isDemo()) {
-      const audio = new Audio("/assets/audio/responses/greeting.mp3");
-      audio.play().catch(() => {});
+      this.playResponseAudio(new Audio("/assets/audio/responses/greeting.mp3"));
     }
 
 
@@ -690,13 +689,14 @@ export class ArenaScene extends Phaser.Scene {
     // --- Feature 1: Live AI responses for custom stories ---
     if (isDemo()) {
       // Demo mode: use pre-baked text + cached MP3
+      this.stopCurrentAudio();
       this.showMessage(fallbackText);
       const audioFile = isCorrectSolution ? "success" : id;
-      const audio = new Audio(`/assets/audio/responses/${audioFile}.mp3`);
-      audio.play().catch(() => {});
+      this.playResponseAudio(new Audio(`/assets/audio/responses/${audioFile}.mp3`));
       this.finalizeDrop(sprite, id, isCorrectSolution, isCorrectObject);
     } else {
       // Custom story: call API for dynamic response
+      this.stopCurrentAudio();
       this.showMessage("...");
       fetch("/api/protagonist", {
         method: "POST",
@@ -786,7 +786,25 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  /** Feature 3: Fetch TTS audio and play it (non-blocking, fire-and-forget) */
+  private stopCurrentAudio() {
+    if (this.currentResponseAudio) {
+      this.currentResponseAudio.pause();
+      this.currentResponseAudio.currentTime = 0;
+      this.currentResponseAudio = undefined;
+    }
+  }
+
+  private playResponseAudio(audio: HTMLAudioElement) {
+    this.stopCurrentAudio();
+    this.currentResponseAudio = audio;
+    audio.play().catch(() => {});
+    audio.addEventListener("ended", () => {
+      if (this.currentResponseAudio === audio) {
+        this.currentResponseAudio = undefined;
+      }
+    });
+  }
+
   private fetchAndPlayTTS(text: string) {
     fetch("/api/voice", {
       method: "POST",
@@ -800,13 +818,10 @@ export class ArenaScene extends Phaser.Scene {
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
           const blob = new Blob([bytes], { type: "audio/mp3" });
-          const audio = new Audio(URL.createObjectURL(blob));
-          audio.play().catch(() => {});
+          this.playResponseAudio(new Audio(URL.createObjectURL(blob)));
         }
       })
-      .catch(() => {
-        // TTS is optional — fail silently
-      });
+      .catch(() => {});
   }
 
   /** Feature 4: Show golden glow behind correct (uncollected) objects */
