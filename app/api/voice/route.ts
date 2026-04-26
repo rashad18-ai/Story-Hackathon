@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     }
 
     const apiKey = process.env.XAI_API_KEY;
-    const voiceId = voice || process.env.MOWGLI_VOICE_ID;
+    const voiceId = voice || process.env.CHARACTER_VOICE_ID || process.env.MOWGLI_VOICE_ID;
 
     if (!apiKey || !voiceId) {
       return NextResponse.json({ audioBase64: null });

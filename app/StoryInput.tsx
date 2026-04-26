@@ -107,9 +107,9 @@ export default function StoryInput({ onStoryReady, onPlayDemo }: StoryInputProps
     }));
 
     // Also generate protagonist portrait if not already in assets
-    if (!assets.images.has("mowgli")) {
+    if (!assets.images.has("protagonist")) {
       requests.push({
-        id: "mowgli",
+        id: "protagonist",
         prompt: bible.protagonist.imagePrompt || `${bible.protagonist.name}, ${bible.protagonist.description}, portrait`,
       });
     }
@@ -207,9 +207,9 @@ export default function StoryInput({ onStoryReady, onPlayDemo }: StoryInputProps
     // Protagonist image — use a mid-story page where character is likely featured
     const midIndex = bible.pages[1]?.sourcePageIndex;
     if (midIndex && midIndex >= 1 && midIndex <= pageImages.length) {
-      images.set("mowgli", pageImages[midIndex - 1]);
+      images.set("protagonist", pageImages[midIndex - 1]);
     } else if (pageImages.length > 2) {
-      images.set("mowgli", pageImages[2]);
+      images.set("protagonist", pageImages[2]);
     }
 
     return { images, audio: new Map() };

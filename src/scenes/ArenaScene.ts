@@ -4,14 +4,14 @@ import { StoryBible } from "@/src/data/types";
 
 export class ArenaScene extends Phaser.Scene {
   private story!: StoryBible;
-  private mowgli!: Phaser.GameObjects.Image;
-  private mowgliGlow!: Phaser.GameObjects.Graphics;
+  private protagonist!: Phaser.GameObjects.Image;
+  private protagonistGlow!: Phaser.GameObjects.Graphics;
   private speechBubble!: Phaser.GameObjects.Container;
   private speechText!: Phaser.GameObjects.Text;
   private collectedIds: string[] = [];
   private objectSprites: Phaser.GameObjects.Image[] = [];
   private isThinking = false;
-  private mowgliDropZone!: Phaser.GameObjects.Zone;
+  private protagonistDropZone!: Phaser.GameObjects.Zone;
   private typewriterTimer?: Phaser.Time.TimerEvent;
   private hint?: Phaser.GameObjects.Text;
 
@@ -31,11 +31,11 @@ export class ArenaScene extends Phaser.Scene {
       this.load.image("background", "/assets/images/cold-lairs-bg.png");
     }
 
-    const protagonistData = assets?.images.get("mowgli");
+    const protagonistData = assets?.images.get("protagonist");
     if (protagonistData) {
-      this.load.image("mowgli", protagonistData);
+      this.load.image("protagonist", protagonistData);
     } else if (demo) {
-      this.load.image("mowgli", "/assets/images/mowgli.png");
+      this.load.image("protagonist", "/assets/images/mowgli.png");
     }
 
     this.story.objects.forEach((obj) => {
@@ -91,11 +91,11 @@ export class ArenaScene extends Phaser.Scene {
     bottomGrad.fillGradientStyle(0x1a3a2e, 0x1a3a2e, 0x1a3a2e, 0x1a3a2e, 0, 0, 0.7, 0.7);
     bottomGrad.fillRect(0, height * 0.55, width, height * 0.45);
 
-    // Mowgli glow ring
-    this.mowgliGlow = this.add.graphics();
+    // Protagonist glow ring
+    this.protagonistGlow = this.add.graphics();
     this.drawGlowRing(width / 2, height * 0.35, 75);
     this.tweens.add({
-      targets: this.mowgliGlow,
+      targets: this.protagonistGlow,
       alpha: { from: 0.35, to: 0.9 },
       duration: 1400,
       yoyo: true,
@@ -103,17 +103,17 @@ export class ArenaScene extends Phaser.Scene {
       ease: "Sine.easeInOut",
     });
 
-    this.mowgli = this.createMowgli(width / 2, height * 0.35);
+    this.protagonist = this.createProtagonist(width / 2, height * 0.35);
 
     // Drop zone
     const dropZone = this.add.zone(width / 2, height * 0.35, 300, 300);
     dropZone.setRectangleDropZone(300, 300);
-    this.mowgliDropZone = dropZone;
+    this.protagonistDropZone = dropZone;
 
-    // Gentle breathing on Mowgli
+    // Gentle breathing animation
     this.tweens.add({
-      targets: this.mowgli,
-      scale: { from: this.mowgli.scale, to: this.mowgli.scale * 1.025 },
+      targets: this.protagonist,
+      scale: { from: this.protagonist.scale, to: this.protagonist.scale * 1.025 },
       duration: 2000,
       yoyo: true,
       repeat: -1,
@@ -206,9 +206,9 @@ export class ArenaScene extends Phaser.Scene {
     this.input.on(
       "dragenter",
       (_pointer: Phaser.Input.Pointer, _go: Phaser.GameObjects.Image, dz: Phaser.GameObjects.GameObject) => {
-        if (dz === this.mowgliDropZone) {
-          this.mowgli.setTint(0xffffaa);
-          this.tweens.add({ targets: this.mowgli, scale: this.mowgli.scale * 1.08, duration: 150, ease: "Sine.easeOut" });
+        if (dz === this.protagonistDropZone) {
+          this.protagonist.setTint(0xffffaa);
+          this.tweens.add({ targets: this.protagonist, scale: this.protagonist.scale * 1.08, duration: 150, ease: "Sine.easeOut" });
         }
       }
     );
@@ -216,9 +216,9 @@ export class ArenaScene extends Phaser.Scene {
     this.input.on(
       "dragleave",
       (_pointer: Phaser.Input.Pointer, _go: Phaser.GameObjects.Image, dz: Phaser.GameObjects.GameObject) => {
-        if (dz === this.mowgliDropZone) {
-          this.mowgli.clearTint();
-          this.tweens.add({ targets: this.mowgli, scale: this.mowgli.getData("baseScale") || this.mowgli.scale, duration: 150 });
+        if (dz === this.protagonistDropZone) {
+          this.protagonist.clearTint();
+          this.tweens.add({ targets: this.protagonist, scale: this.protagonist.getData("baseScale") || this.protagonist.scale, duration: 150 });
         }
       }
     );
@@ -226,8 +226,8 @@ export class ArenaScene extends Phaser.Scene {
     this.input.on(
       "drop",
       (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image, dz: Phaser.GameObjects.GameObject) => {
-        if (dz === this.mowgliDropZone) {
-          this.mowgli.clearTint();
+        if (dz === this.protagonistDropZone) {
+          this.protagonist.clearTint();
           gameObject.setData("isDragging", false);
           this.handleDrop(gameObject);
         }
@@ -239,9 +239,9 @@ export class ArenaScene extends Phaser.Scene {
       (_pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.Image, dropped: boolean) => {
         gameObject.setData("isDragging", false);
 
-        const dist = Phaser.Math.Distance.Between(gameObject.x, gameObject.y, this.mowgli.x, this.mowgli.y);
+        const dist = Phaser.Math.Distance.Between(gameObject.x, gameObject.y, this.protagonist.x, this.protagonist.y);
         if (!dropped && dist < 200) {
-          this.mowgli.clearTint();
+          this.protagonist.clearTint();
           this.handleDrop(gameObject);
           return;
         }
@@ -286,18 +286,18 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private drawGlowRing(x: number, y: number, radius: number) {
-    this.mowgliGlow.clear();
-    this.mowgliGlow.lineStyle(10, 0xffd700, 0.2);
-    this.mowgliGlow.strokeCircle(x, y, radius + 14);
-    this.mowgliGlow.lineStyle(5, 0xffd700, 0.5);
-    this.mowgliGlow.strokeCircle(x, y, radius + 6);
-    this.mowgliGlow.lineStyle(2, 0xffe44d, 0.8);
-    this.mowgliGlow.strokeCircle(x, y, radius);
+    this.protagonistGlow.clear();
+    this.protagonistGlow.lineStyle(10, 0xffd700, 0.2);
+    this.protagonistGlow.strokeCircle(x, y, radius + 14);
+    this.protagonistGlow.lineStyle(5, 0xffd700, 0.5);
+    this.protagonistGlow.strokeCircle(x, y, radius + 6);
+    this.protagonistGlow.lineStyle(2, 0xffe44d, 0.8);
+    this.protagonistGlow.strokeCircle(x, y, radius);
   }
 
-  private createMowgli(x: number, y: number): Phaser.GameObjects.Image {
-    if (this.textures.exists("mowgli")) {
-      const m = this.add.image(x, y, "mowgli");
+  private createProtagonist(x: number, y: number): Phaser.GameObjects.Image {
+    if (this.textures.exists("protagonist")) {
+      const m = this.add.image(x, y, "protagonist");
       const baseScale = 120 / Math.max(m.width, m.height);
       m.setScale(baseScale);
       m.setData("baseScale", baseScale);
@@ -328,9 +328,9 @@ export class ArenaScene extends Phaser.Scene {
     g.fillCircle(0, 0, 40);
     g.lineStyle(3, 0x6b4423);
     g.strokeCircle(0, 0, 40);
-    g.generateTexture("mowgli_placeholder", 80, 80);
+    g.generateTexture("protagonist_placeholder", 80, 80);
     g.destroy();
-    const m = this.add.image(x, y, "mowgli_placeholder");
+    const m = this.add.image(x, y, "protagonist_placeholder");
     m.setData("baseScale", 1);
     this.add
       .text(x, y + 50, this.story.protagonist.name, { fontSize: "15px", color: "#fdf6e3", fontFamily: "Nunito, sans-serif", fontStyle: "bold" })
@@ -477,7 +477,7 @@ export class ArenaScene extends Phaser.Scene {
     bg.fillRoundedRect(-bubbleWidth / 2, -48, bubbleWidth, 96, 18);
     bg.strokeRoundedRect(-bubbleWidth / 2, -48, bubbleWidth, 96, 18);
 
-    // Speech bubble tail (triangle pointing down to Mowgli)
+    // Speech bubble tail pointing down to protagonist
     bg.fillStyle(0xffffff, 0.95);
     bg.fillTriangle(-12, 48, 12, 48, 0, 64);
     bg.lineStyle(2, 0x6b4423, 0.5);
@@ -538,10 +538,10 @@ export class ArenaScene extends Phaser.Scene {
     const id = sprite.getData("id") as string;
     this.safePlay("drop");
 
-    // Mowgli reaction bounce
+    // Protagonist reaction bounce
     this.tweens.add({
-      targets: this.mowgli,
-      scale: this.mowgli.scale * 1.08,
+      targets: this.protagonist,
+      scale: this.protagonist.scale * 1.08,
       duration: 120,
       yoyo: true,
       ease: "Sine.easeOut",
@@ -582,7 +582,7 @@ export class ArenaScene extends Phaser.Scene {
       this.celebrate();
     } else if (isCorrectObject) {
       const correctIndex = this.story.solution.indexOf(id);
-      this.flyToMowgli(sprite, correctIndex === 0 ? -60 : 60);
+      this.flyToProtagonist(sprite, correctIndex === 0 ? -60 : 60);
       sprite.disableInteractive();
       this.isThinking = false;
     } else {
@@ -618,9 +618,9 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private flyToMowgli(sprite: Phaser.GameObjects.Image, offsetX: number) {
-    const targetX = this.mowgli.x + offsetX;
-    const targetY = this.mowgli.y + 40;
+  private flyToProtagonist(sprite: Phaser.GameObjects.Image, offsetX: number) {
+    const targetX = this.protagonist.x + offsetX;
+    const targetY = this.protagonist.y + 40;
 
     // Sparkle trail
     const trailInterval = this.time.addEvent({
@@ -660,7 +660,7 @@ export class ArenaScene extends Phaser.Scene {
     const { width, height } = this.scale;
 
     // Hide glow
-    this.tweens.add({ targets: this.mowgliGlow, alpha: 0, duration: 300 });
+    this.tweens.add({ targets: this.protagonistGlow, alpha: 0, duration: 300 });
 
     // Burst particles — varied sizes + colors
     const burstColors = [0xffd700, 0xff6b6b, 0x48dbfb, 0xff9ff3, 0x54a0ff, 0xfeca57, 0x2ecc71];
@@ -712,23 +712,23 @@ export class ArenaScene extends Phaser.Scene {
       });
     }
 
-    // Mowgli jump + celebrate
+    // Protagonist jump + celebrate
     this.tweens.add({
-      targets: this.mowgli,
-      y: this.mowgli.y - 50,
+      targets: this.protagonist,
+      y: this.protagonist.y - 50,
       duration: 350,
       yoyo: true,
       ease: "Cubic.easeOut",
       onComplete: () => {
         this.tweens.add({
-          targets: this.mowgli,
+          targets: this.protagonist,
           angle: { from: -12, to: 12 },
           duration: 180,
           yoyo: true,
           repeat: 4,
           ease: "Sine.easeInOut",
           onComplete: () => {
-            this.mowgli.setAngle(0);
+            this.protagonist.setAngle(0);
           },
         });
       },
